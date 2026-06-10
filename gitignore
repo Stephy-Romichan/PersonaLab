@@ -1,0 +1,25 @@
+# Secrets — never commit
+.env
+*.env
+!.env.template
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Demo-mode cache (seeded runs) — regenerate locally, don't commit
+*.cache
+demo_cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
