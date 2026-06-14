@@ -5,11 +5,12 @@ import json
 import time
 import random
 from concurrent.futures import ThreadPoolExecutor
-
+from dotenv import load_dotenv
+load_dotenv()
 # ----------------------------------------------------------------------
 # CONFIG: mock toggle + cost-aware model routing
 # ----------------------------------------------------------------------
-USE_MOCKS = True  # M1/M2: keep True (no spend). Flip to False at M3.
+USE_MOCKS = False  # M1/M2: keep True (no spend). Flip to False at M3.
 
 # Each agent routes to the cheapest model that fits its job (cost-aware routing).
 MODEL_ROUTING = {
@@ -304,7 +305,7 @@ def run_persona_lab(idea):
 
 
 if __name__ == "__main__":
-    idea = "A subscription app that turns your grocery receipts into weekly meal plans."
+    idea = "A subscription app that gives you weekly gym schedule based on your calendar."
     out = run_persona_lab(idea)
     print("IDEA:", out["idea"], "\n")
     print("=== PANEL ===")
