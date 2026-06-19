@@ -4,9 +4,14 @@ Runs end-to-end with ZERO API calls when USE_MOCKS = True.
 import json
 import time
 import random
+import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 load_dotenv()
+
+logger = logging.getLogger("persona_lab")
+
 # ----------------------------------------------------------------------
 # CONFIG: mock toggle + cost-aware model routing
 # ----------------------------------------------------------------------
@@ -21,6 +26,31 @@ MODEL_ROUTING = {
     # single hardest reasoning step -> cheapest Claude (upgrade to sonnet only for final runs)
     "strategist":{"provider": "anthropic", "model": "claude-haiku-4-5"},
 }
+
+# ----------------------------------------------------------------------
+# RATE LIMITING (M4): free-tier Gemini Flash-Lite is ~15 RPM. The panel fires
+# 5 personas concurrently, so an unthrottled batch bursts past the per-minute
+# cap and trips 429. PERSONA_RPM sets the budget; set it to whatever Google AI
+# Studio shows for YOUR project.
+# ----------------------------------------------------------------------
+PERSONA_RPM = 15                              # Gemini Flash-Lite free-tier RPM
+PERSONA_MAX_WORKERS = 2                        # cap concurrency (was 5)
+PERSONA_CALL_SPACING = 60.0 / PERSONA_RPM      # ~4.0s between call starts at 15 RPM
+
+_rate_lock = threading.Lock()
+_last_call_ts = [0.0]
+
+
+def _rate_gate():
+    """Block until >= PERSONA_CALL_SPACING has passed since the previous call
+    start. Shared across all persona workers AND across the whole batch, so it
+    enforces RPM globally, not just within one idea."""
+    with _rate_lock:
+        now = time.monotonic()
+        wait = PERSONA_CALL_SPACING - (now - _last_call_ts[0])
+        if wait > 0:
+            time.sleep(wait)
+        _last_call_ts[0] = time.monotonic()
 
 # ----------------------------------------------------------------------
 # PERSONAS: attitude-based (not demographic), with hidden priorities.
@@ -74,10 +104,11 @@ Your private priorities (these silently drive your reaction — NEVER list them 
 2. Filter the idea through your private priorities above. If the idea ignores what you care about, say so plainly.
 3. You are ONE voice on a panel of five. You are NOT trying to reach the "right" answer — you are giving YOUR take. Disagreeing with the likely majority is good and expected.
 4. Be concrete and specific to THIS idea. Reference an actual detail of it. Generic reactions ("sounds interesting!") are a failure.
-5. ALWAYS surface the single thing that would make YOU personally refuse to adopt, buy, or recommend this.
+5. ALWAYS surface your single biggest reservation — the thing you'd most want addressed. This may be a dealbreaker, or it may be a caveat you'd accept while still adopting. Name it honestly either way.
 
 # HARD CONSTRAINTS (violating these ruins the focus group)
 - NO cheerleading. Enthusiasm without a concrete reason is sycophancy and is forbidden.
+- NO reflexive cynicism either. Manufacturing a complaint about an idea that genuinely fits your priorities is just as dishonest as cheerleading. React to THIS idea on its merits — if it serves what you care about, say so.
 - NO hedging into neutrality ("it has pros and cons"). Take a position.
 - NO breaking character. You never acknowledge being a model or a persona.
 - Keep the reaction to 2–3 sentences. Tight and pointed beats long and vague.
@@ -86,7 +117,7 @@ Your private priorities (these silently drive your reaction — NEVER list them 
 - "positive"  = you would plausibly try/buy/recommend it, despite reservations.
 - "mixed"     = genuinely on the fence; real interest AND a real blocker.
 - "negative"  = you would not adopt it as described.
-Pick the one that honestly matches YOUR stance — do not default to "mixed" to play it safe.
+Pick the one that honestly matches YOUR stance. Do not default to "mixed" to play it safe — and do not default to "negative" to seem discerning. If this idea genuinely serves your priorities, "positive" is the honest answer.
 
 # FEW-SHOT EXAMPLES  (these show the VOICE and divergence expected — do not copy the content, only the style)
 Example A — a different persona ("Budget Watcher") reacting to a paid note-taking app:
@@ -95,7 +126,10 @@ Example A — a different persona ("Budget Watcher") reacting to a paid note-tak
 Example B — a different persona ("Tech Optimist") reacting to the same app:
 {{"persona": "Tech Optimist", "reaction": "The AI auto-tagging is the part I'd actually open daily — that's the hook. But if the tagging is wrong even 10% of the time I'll stop trusting it and bail within a week.", "sentiment": "mixed", "key_objection": "Auto-tagging accuracy makes or breaks the whole thing."}}
 
-Notice: both are specific, both name a concrete dealbreaker, and they DISAGREE. Match that style as {name}.
+Example C — a different persona ("Workflow Pragmatist") reacting to the same app:
+{{"persona": "Workflow Pragmatist", "reaction": "The offline sync is the one feature that actually solves my problem — I've lost notes to bad connections too many times, so this earns a spot in my workflow. My only worry is whether export stays open if I ever want to migrate out.", "sentiment": "positive", "key_objection": "Data portability if I ever need to leave the platform."}}
+
+Notice: all three are specific, all three name a concrete reservation, and they DISAGREE — one would refuse, one is on the fence, one would adopt. A reservation does NOT require a negative verdict. Match this range and specificity as {name}.
 
 # OUTPUT FORMAT
 Respond with ONLY valid JSON. No markdown fences, no preamble, no trailing text.
@@ -212,6 +246,22 @@ def _mock_strategist(_themes):
             "- Keep one bold/novel feature visible to retain early-adopter pull.")
 
 # ----------------------------------------------------------------------
+# RETRY HELPER (M4): exponential backoff + jitter for transient API errors.
+# Re-raises the last error if all attempts fail, so the degrade chain (or
+# _safe_json fallback) can catch it.
+# ----------------------------------------------------------------------
+def _with_retries(fn, attempts=3, base_delay=1.0):
+    last_err = None
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001 — broad on purpose for transient API errors
+            last_err = e
+            if i < attempts - 1:
+                time.sleep(base_delay * (2 ** i) + random.uniform(0, 0.5))
+    raise last_err
+
+# ----------------------------------------------------------------------
 # LLM CLIENT: dispatches to mock or real. Real clients import lazily so the
 # notebook runs in mock mode WITHOUT any SDK installed.
 # ----------------------------------------------------------------------
@@ -256,18 +306,72 @@ def _call_anthropic(model, system, user):
     return resp.content[0].text
 
 # ----------------------------------------------------------------------
+# PERSONA DEGRADE CHAIN (M4): a 503 on one model shouldn't kill the panel.
+# Degrade across MODELS, then PROVIDERS, then to a soft placeholder.
+#   gemini-2.5-flash-lite -> gemini-2.5-flash -> gpt-4o-mini
+#     -> claude-haiku-4-5 -> placeholder (panel returns 4/5 instead of crashing)
+# Each hop wrapped in _with_retries. Only persona calls degrade; moderator and
+# strategist keep their single-model paths.
+# ----------------------------------------------------------------------
+PERSONA_DEGRADE_CHAIN = [
+    ("google",    "gemini-2.5-flash-lite"),
+    ("google",    "gemini-2.5-flash"),
+    ("openai",    "gpt-4o-mini"),
+    ("anthropic", "claude-haiku-4-5"),
+]
+
+_PROVIDER_DISPATCH = {
+    "google":    _call_gemini,
+    "openai":    _call_openai,
+    "anthropic": _call_anthropic,
+}
+
+
+def _persona_placeholder(name):
+    """Returned only when every live hop has failed. Keeps the panel intact
+    (4/5 instead of a crash) and is flagged so it can't pollute diagnostics."""
+    return json.dumps({
+        "persona": name,
+        "reaction": "(This panelist was unavailable — all model providers failed for this call.)",
+        "sentiment": "mixed",
+        "key_objection": "n/a — provider outage",
+        "_degraded": True,
+    })
+
+
+def _call_persona_with_degrade(system, user, persona_name):
+    """Walk the degrade chain for one persona call. Each hop gets _with_retries;
+    on final failure step to the next provider/model. Exhausted -> placeholder."""
+    for provider, model in PERSONA_DEGRADE_CHAIN:
+        fn = _PROVIDER_DISPATCH[provider]
+        try:
+            return _with_retries(lambda: fn(model, system, user))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("persona degrade: %s/%s failed for '%s' (%s); trying next hop",
+                           provider, model, persona_name, type(e).__name__)
+            continue
+    logger.error("persona degrade: ALL hops failed for '%s'; using placeholder", persona_name)
+    return _persona_placeholder(persona_name)
+
+# ----------------------------------------------------------------------
 # AGENTS
 # ----------------------------------------------------------------------
 def run_persona_panel(idea):
-    """Run all personas concurrently; return list of parsed reactions."""
+    """Run personas concurrently but RATE-LIMITED, with degrade fallback.
+    Mock mode keeps full concurrency and skips the rate gate (instant + free)."""
     def one(p):
         system = PERSONA_SYSTEM_TEMPLATE.format(
             name=p["name"], stance=p["stance"],
             priorities=", ".join(p["hidden_priorities"]), voice=p["voice"], idea=idea)
-        raw = call_llm("persona", system, idea, _mock_persona_for(p["name"]), idea)
+        if USE_MOCKS:
+            raw = _mock_persona_for(p["name"])(idea)
+        else:
+            _rate_gate()  # throttle only matters for real API calls
+            raw = _call_persona_with_degrade(system, idea, p["name"])
         return _safe_json(raw, fallback={"persona": p["name"], "reaction": raw,
                                          "sentiment": "mixed", "key_objection": "n/a"})
-    with ThreadPoolExecutor(max_workers=len(PERSONAS)) as ex:
+    workers = len(PERSONAS) if USE_MOCKS else PERSONA_MAX_WORKERS
+    with ThreadPoolExecutor(max_workers=workers) as ex:
         return list(ex.map(one, PERSONAS))
 
 def _mock_persona_for(name):
@@ -305,7 +409,7 @@ def run_persona_lab(idea):
 
 
 if __name__ == "__main__":
-    idea = "A subscription app that gives you weekly gym schedule based on your calendar."
+    idea = "A free, open-source browser extension that instantly adds accessibility alt-text to every image on a page — runs 100% on-device with no data leaving your browser, no account, no setup, and a one-click toggle. Nothing changes on the underlying site, so there's nothing to break or migrate."
     out = run_persona_lab(idea)
     print("IDEA:", out["idea"], "\n")
     print("=== PANEL ===")
