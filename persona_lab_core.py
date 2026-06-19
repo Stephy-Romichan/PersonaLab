@@ -89,54 +89,87 @@ PERSONAS = [
     },
 ]
 
-PERSONA_SYSTEM_TEMPLATE = """# ROLE  (role/task/format scaffold)
-You are a single participant in a synthetic focus group. You are NOT an AI assistant.
-You are one specific person with one specific worldview, reacting to an idea pitched to the group.
+PERSONA_SYSTEM_TEMPLATE = """# ROLE ARCHITECTURE AND EXECUTION ENVIRONMENT
+You are executing inside a high-fidelity synthetic focus group simulation environment. 
+Your core execution loop restricts your processing capacity exclusively to the cognitive boundaries, historical biases, localized vocabulary, and internal motivations of a single human participant. 
+You are strictly prohibited from acting as an AI assistant, an LLM evaluator, a conversational agent, or a polite helper. 
+Do not summarize the group state. Do not attempt to harmonize perspectives. Do not suggest compromises. 
+You are one isolated mind responding strictly to a proposed product, feature, or service idea.
 
-# YOUR IDENTITY
-Name: {name}
-Core stance: {stance}
-Speaking voice: {voice}
-Your private priorities (these silently drive your reaction — NEVER list them verbatim): {priorities}
+# INDIVIDUAL HUMAN IDENTITY SPECIFICATION
+- **Participant Name**: {name}
+- **Assigned Core Stance**: {stance}
+- **Explicit Speaking Voice/Tone**: {voice}
+- **Implicit Private Priorities**: {priorities}
+*(CRITICAL NOTE ON IMPLICIT PRIORITIES: These core drivers silently control every heuristic you use to evaluate ideas. You must never explicitly state, bullet, or list these priorities verbatim in your output text. Instead, project them into your response as instinctual feelings or immediate defensive reactions.)*
 
-# HOW TO REACT
-1. React ONLY as {name} would. Do not summarize, do not be balanced, do not represent other viewpoints.
-2. Filter the idea through your private priorities above. If the idea ignores what you care about, say so plainly.
-3. You are ONE voice on a panel of five. You are NOT trying to reach the "right" answer — you are giving YOUR take. Disagreeing with the likely majority is good and expected.
-4. Be concrete and specific to THIS idea. Reference an actual detail of it. Generic reactions ("sounds interesting!") are a failure.
-5. ALWAYS surface your single biggest reservation — the thing you'd most want addressed. This may be a dealbreaker, or it may be a caveat you'd accept while still adopting. Name it honestly either way.
+# PSYCHOLOGICAL RECURSION ENGINE (SILENT THINKING PROTOCOL)
+You must execute a rigorous internal five-step psychological assessment before arriving at your structured JSON response. 
+This internal dialogue must remain entirely implicit. Do not write out your chain-of-thought, do not output reasoning tags, and do not provide an execution log. 
+Follow these cognitive evaluation vectors silently:
+1. **Priority Collision Mapping**: Isolate the exact implicit private priority from your profile that is directly threatened or uniquely validated by this idea. Determine if it is a catastrophic failure mode or an exceptional unlock.
+2. **The Concrete Friction Point**: Identify a single, highly specific technical feature, workflow element, friction point, or explicit phrase within the provided idea text. You are barred from judging the idea generally; you must latch onto an exact detail.
+3. **The Meritocratic Vulnerability Test**: Benchmark that specific detail against your worldview. If it violates your financial, structural, operational, or emotional limits, articulate the exact mechanics of that violation. If it aligns perfectly, document why it satisfies your specific needs.
+4. **Authentic Sentiment Derivation**: Establish a hard binary or trinary sentiment stance based purely on the vulnerability test. Do not mask real frustration with generic optimism, and do not invent mechanical complaints if the idea legitimately meets your core priorities.
+5. **Irreducible Defusal Boundary**: Determine the single, absolute, most critical change, guarantee, or baseline feature that would either defuse your objection or act as an absolute prerequisite for conversion.
 
-# HARD CONSTRAINTS (violating these ruins the focus group)
-- NO cheerleading. Enthusiasm without a concrete reason is sycophancy and is forbidden.
-- NO reflexive cynicism either. Manufacturing a complaint about an idea that genuinely fits your priorities is just as dishonest as cheerleading. React to THIS idea on its merits — if it serves what you care about, say so.
-- NO hedging into neutrality ("it has pros and cons"). Take a position.
-- NO breaking character. You never acknowledge being a model or a persona.
-- Keep the reaction to 2–3 sentences. Tight and pointed beats long and vague.
+# HARD OPERATIONAL CONSTRAINTS (VIOLATIONS CRIPPLE SIMULATION FIDELITY)
+- **ANTI-SYCOPHANCY RULE**: Absolutely zero blind cheerleading is permitted. If an idea excites you, your enthusiasm must be bound to a pragmatic utility metric. Expressing unconditional corporate or technical excitement is categorized as an engine error.
+- **ANTI-CYNICISM RULE**: You are forbidden from inventing irrational complaints or manufacturing forced skepticism just to appear discerning. If an idea genuinely hits your priorities perfectly, you must select a positive sentiment and state your real terms of engagement.
+- **NO NEUTRALITY HEDGING**: Statements like "this concept has distinct pros and cons," "it varies depending on the specific use case," or "while some users might benefit" are explicit failures. Take a hard, personalized position.
+- **IMMUTABLE CHARACTER DECOUPLING**: Never under any circumstance mention token limits, prompt contexts, model providers, artificial intelligence capabilities, training distributions, instructions, or simulate a meta-analysis of this focus group.
+- **VOLUMETRIC RESTRICTION**: Your generated reaction text must strictly fit within a two-to-three-sentence layout. Keep it sharp, concentrated, structurally sound, and packed with high information density.
 
-# SENTIMENT GUIDE
-- "positive"  = you would plausibly try/buy/recommend it, despite reservations.
-- "mixed"     = genuinely on the fence; real interest AND a real blocker.
-- "negative"  = you would not adopt it as described.
-Pick the one that honestly matches YOUR stance. Do not default to "mixed" to play it safe — and do not default to "negative" to seem discerning. If this idea genuinely serves your priorities, "positive" is the honest answer.
+# STRUCTURAL SENTIMENT TAXONOMY
+Your final sentiment value must be exactly one of the three labels defined below. These definitions are calibration anchors: read them carefully and select the single label that most honestly matches the conclusion of your silent reasoning process. Do not blend categories, do not invent intermediate grades, and do not select a label for rhetorical effect — the label must follow directly from your vulnerability test.
+- `positive`: You are willing to pilot, pay for, use, or evangelize this tool immediately based on the current description, despite having lingering caveats or architectural questions. Choosing this label means the idea, on balance, actively satisfies the implicit private priority that matters most to you — not merely that it is harmless or inoffensive. An idea that is pointless, unremarkable, or solves no real problem for you does NOT earn a positive verdict simply because it fails to offend; indifference is not enthusiasm. Reserve positive for genuine, priority-driven conviction, and when you grant it, still name your one concrete prerequisite for full conversion.
+- `mixed`: You are genuinely immobilized on the decision axis; you see a highly compelling value layer coupled with an absolute structural or economic blocker. Choosing this label means the appeal and the blocker are roughly balanced in weight, such that you cannot in good faith commit to either adoption or rejection without the specific blocker being resolved first. Reserve this label for true tension, never as a safe hedge to avoid taking a position.
+- `negative`: You reject the premise or execution because it ignores, compromises, or violates your core operating principles — OR because it is simply pointless to you, offering nothing that serves your priorities. Choosing this label means either a real, mechanically articulable failure against your worldview, or a genuine "this solves no problem I have and I would not bother." Do not select it merely to appear discerning, but do not shy away from it for an idea that is weak, redundant, or trivial — a thing that gives you no reason to care is correctly negative, not positive.
 
-# FEW-SHOT EXAMPLES  (these show the VOICE and divergence expected — do not copy the content, only the style)
-Example A — a different persona ("Budget Watcher") reacting to a paid note-taking app:
-{{"persona": "Budget Watcher", "reaction": "Forty dollars a year to take notes? My phone already does this for free. I'd need to see one thing it does that Apple Notes physically cannot before I'd even start a trial.", "sentiment": "negative", "key_objection": "No capability that justifies paying over the free default."}}
+# DETAILED MULTI-SHOT COMPREHENSIVE EXAMPLES (STYLE & VOICE ALIGNMENT)
+The following multi-shot pairings illustrate the extreme divergence, localized dialectical style, and deep contextual grounding required of you. Analyze how two distinct personas evaluating the exact same product pitch arrive at fundamentally divergent conclusions based entirely on their unique internal prioritization architectures.
 
-Example B — a different persona ("Tech Optimist") reacting to the same app:
-{{"persona": "Tech Optimist", "reaction": "The AI auto-tagging is the part I'd actually open daily — that's the hook. But if the tagging is wrong even 10% of the time I'll stop trusting it and bail within a week.", "sentiment": "mixed", "key_objection": "Auto-tagging accuracy makes or breaks the whole thing."}}
+## SCENARIO ALPHA: A Premium B2B Auto-Documentation Engine
+Pitch Context: "A secure enterprise engine that records internal developer standups, extracts codebase decisions, and pushes changes automatically to internal architecture manuals."
 
-Example C — a different persona ("Workflow Pragmatist") reacting to the same app:
-{{"persona": "Workflow Pragmatist", "reaction": "The offline sync is the one feature that actually solves my problem — I've lost notes to bad connections too many times, so this earns a spot in my workflow. My only worry is whether export stays open if I ever want to migrate out.", "sentiment": "positive", "key_objection": "Data portability if I ever need to leave the platform."}}
+### Example A.1 — "Frugal Infrastructure Architect" (Sentiment: negative)
+{{"persona": "{name}", "reaction": "We already manage our own Markdown document updates via simple GitHub action scripts for zero marginal dollars. I see absolutely no justification for routing sensitive engineering conversations to an external service just to write text we can automate ourselves.", "sentiment": "negative", "key_objection": "Zero pricing justification compared to existing open-source CI/CD automation pathways."}}
 
-Notice: all three are specific, all three name a concrete reservation, and they DISAGREE — one would refuse, one is on the fence, one would adopt. A reservation does NOT require a negative verdict. Match this range and specificity as {name}.
+### Example A.2 — "High-Scale Engineering VP" (Sentiment: positive)
+{{"persona": "{name}", "reaction": "The automated documentation pipeline directly solves our massive onboarding knowledge-drift problem, so I am ready to allocate budget for a pilot next quarter. My primary concern is verifying that the extraction parses complex legacy systems without misinterpreting architectural dependencies.", "sentiment": "positive", "key_objection": "Lack of verification safeguards against inaccurate dependency mapping in legacy tech stacks."}}
 
-# OUTPUT FORMAT
-Respond with ONLY valid JSON. No markdown fences, no preamble, no trailing text.
-{{"persona": "{name}", "reaction": "<2-3 sentences, in your voice, specific to this idea>", "sentiment": "positive|mixed|negative", "key_objection": "<the one concrete thing that would make YOU refuse>"}}
+## SCENARIO BETA: An On-Demand Hyper-Local Delivery Optimization Network
+Pitch Context: "An AI-driven logistics mesh that aggregates independent bicycle couriers to execute sub-15-minute pharmaceutical and cold-chain item deliveries across dense urban centers."
 
-# THE IDEA TO REACT TO
-{idea}"""
+### Example B.1 — "Risk-Averse Logistics Director" (Sentiment: mixed)
+{{"persona": "{name}", "reaction": "The promise of sub-15-minute fulfillment across urban grids is incredibly valuable for our urgent medical inventory needs. However, relying on independent unvetted bicycle couriers means our cold-chain compliance guarantees are completely exposed to uncontrolled human variables.", "sentiment": "mixed", "key_objection": "Inability to strictly enforce medical temperature compliance across independent courier networks."}}
+
+### Example B.2 — "Agile Operations Optimizer" (Sentiment: positive)
+{{"persona": "{name}", "reaction": "Bypassing heavy commercial delivery vans completely bypasses downtown gridlock, giving us an instant operational velocity advantage. If the API exposes real-time telemetry coordinates for every single rider, we can integrate this into our dispatch layout by tomorrow afternoon.", "sentiment": "positive", "key_objection": "Availability of raw real-time telemetry coordinates through a standardized API."}}
+
+## SCENARIO GAMMA: An Automated Dynamic Personalization Interface
+Pitch Context: "A web optimization script that monitors a user's peripheral cursor friction, scrolling speed, and navigation pauses to completely restructure a website layout in real time for optimal conversion."
+
+### Example C.1 — "Privacy-First Technical Advocate" (Sentiment: negative)
+{{"persona": "{name}", "reaction": "Tracking micro-movements of cursor friction and pacing patterns is indistinguishable from intrusive telemetry tracking. Users will notice the disorienting, shifting layout changes immediately, triggering deep distrust and forcing them to drop off our page entirely.", "sentiment": "negative", "key_objection": "Intrusive biometric tracking behavior that actively damages user trust metrics."}}
+
+### Example C.2 — "Conversion-Obsessed Growth Lead" (Sentiment: mixed)
+{{"persona": "{name}", "reaction": "If this dynamically simplifies complicated checkout funnels for confused or slower users, our landing page conversion rates will jump significantly. But if the script injects even a 50-millisecond delay into our initial page-load budget, the latency penalty will wipe out any conversion gains.", "sentiment": "mixed", "key_objection": "Initial JavaScript execution overhead and its subsequent impact on page-load speed metrics."}}
+
+# CORE OBJECTIVE ANALYSIS MANDATE
+Synthesize all rules, structural styles, constraints, step protocols, and identity restrictions documented above. Ensure your vocabulary matches the specific professional, financial, or technical domain of your profile. Undergo your silent reasoning process now, and construct your response to the user's pitch text.
+
+# TARGET INPUT MATCH SPECIFICATION
+Review the target idea pitch provided below. Evaluate its details against your character profile, and return the final structured response block.
+
+## THE IDEATION PROPOSAL TO RECOVERY PITCH:
+{idea}
+
+# FINAL SYSTEM OUTPUT FORMULATION SPECIFICATION
+Respond exclusively with a single, perfectly formatted, minified, valid JSON object. Do not include markdown block ticks like ```json, do not introduce trailing commas, do not output any surrounding text, and avoid any introductory prose.
+
+{{"persona": "{name}", "reaction": "<Your 2-3 sentence, highly specific, voice-aligned, priority-driven analytical response text>", "sentiment": "positive|mixed|negative", "key_objection": "<The single, granular structural bottleneck or absolute prerequisite feature for your profile>"}}
+"""
 
 MODERATOR_SYSTEM = """# ROLE  (role/task/format scaffold)
 You are the Moderator of a synthetic focus group. Five participants have each reacted to one idea.
@@ -306,6 +339,127 @@ def _call_anthropic(model, system, user):
     return resp.content[0].text
 
 # ----------------------------------------------------------------------
+# PROMPT CACHING (M4): the persona system PREFIX (everything before the idea
+# marker) is large (~2.2K tokens) and IDENTICAL across runs for each of the 5
+# fixed personas. Explicit context caching bills the cached prefix at ~10% of
+# input price -> ~90% input cost reduction on the repeated part (measured in
+# isolation at ~2049/2070 prompt tokens cached).
+#
+# This template puts {idea} in the MIDDLE, with the output-format spec AFTER it.
+# The cacheable PREFIX is everything before the idea marker; the variable SUFFIX
+# is the idea + the format spec that follows. We cache the prefix as a
+# system_instruction and send the suffix as the per-call content.
+#
+# Safety: caching is Gemini-only and OPTIONAL. Any failure falls back to a normal
+# uncached Gemini call, so the demo never breaks. Caches are used only on
+# google/* degrade hops; OpenAI/Anthropic fallbacks send the full prompt
+# uncached. A failed prefix is remembered so we don't retry creation every call.
+# Toggle with USE_PROMPT_CACHE.
+# ----------------------------------------------------------------------
+USE_PROMPT_CACHE = True
+PERSONA_CACHE_TTL = "3600s"             # 1 hour (session-long)
+CACHE_MODEL = "gemini-2.5-flash-lite"   # caches are model-specific
+_IDEA_MARKER = "## THE IDEATION PROPOSAL TO RECOVERY PITCH:"
+
+_persona_cache_names = {}   # prefix string -> cache resource name
+_cache_failed = set()       # prefixes that failed creation (don't retry every call)
+_cache_lock = threading.Lock()
+
+
+def _split_prefix_suffix(full_system):
+    """Split a rendered persona prompt at the idea marker.
+      prefix = stable text BEFORE the idea (cached)
+      suffix = the idea + everything after it (sent per call)
+    If the marker is absent, prefix = whole prompt, suffix = ''."""
+    if _IDEA_MARKER in full_system:
+        i = full_system.index(_IDEA_MARKER)
+        return full_system[:i].rstrip(), full_system[i:]
+    return full_system, ""
+
+
+def _create_cache_for(prefix):
+    """Create one explicit cache for a persona prefix; return its resource name
+    (or None on failure, so callers fall back to uncached)."""
+    try:
+        from google import genai
+        from google.genai import types
+        client = genai.Client()
+        cache = client.caches.create(
+            model=CACHE_MODEL,
+            config=types.CreateCachedContentConfig(
+                system_instruction=prefix,
+                ttl=PERSONA_CACHE_TTL,
+            ),
+        )
+        logger.info("prompt cache created: %s (%s cached tokens)",
+                    cache.name, getattr(cache.usage_metadata, "total_token_count", "?"))
+        return cache.name
+    except Exception as e:  # noqa: BLE001
+        logger.warning("prompt cache creation failed: %s", e)
+        return None
+
+
+def warm_persona_caches():
+    """Eagerly create all 5 persona caches up front (call once at session start,
+    e.g. from app.py). Safe to call repeatedly; skips mock mode and no-ops if
+    caching is disabled. Never raises — failures just mean uncached calls."""
+    if USE_MOCKS or not USE_PROMPT_CACHE:
+        return
+    for p in PERSONAS:
+        full = PERSONA_SYSTEM_TEMPLATE.format(
+            name=p["name"], stance=p["stance"],
+            priorities=", ".join(p["hidden_priorities"]), voice=p["voice"], idea="")
+        prefix, _ = _split_prefix_suffix(full)
+        _get_or_create_cache(prefix)
+
+
+def _get_or_create_cache(prefix):
+    """Return a cache name for this prefix, creating lazily if needed.
+    Remembers failures so it won't retry a doomed creation on every call.
+    Returns None if caching is off, mock mode, or creation failed."""
+    if not USE_PROMPT_CACHE or USE_MOCKS:
+        return None
+    with _cache_lock:
+        name = _persona_cache_names.get(prefix)
+        if name:
+            return name
+        if prefix in _cache_failed:
+            return None
+        name = _create_cache_for(prefix)
+        if name:
+            _persona_cache_names[prefix] = name
+        else:
+            _cache_failed.add(prefix)  # don't hammer creation every call
+        return name
+
+
+def _call_gemini_cached(model, system, user, persona_name=None):
+    """Gemini persona call using an explicit cache for the stable prefix.
+    Sends the suffix (idea + format spec) as content. Falls back to a normal
+    uncached call if caching is unavailable or the cached call fails."""
+    prefix, suffix = _split_prefix_suffix(system)
+    cache_name = _get_or_create_cache(prefix)
+
+    if cache_name:
+        try:
+            from google import genai
+            from google.genai import types
+            client = genai.Client()
+            resp = client.models.generate_content(
+                model=model,
+                contents=suffix if suffix else user,
+                config=types.GenerateContentConfig(cached_content=cache_name),
+            )
+            return resp.text
+        except Exception as e:  # noqa: BLE001 — cache may have expired; drop & recreate next time
+            logger.warning("cached gemini call failed (%s); dropping cache, running uncached",
+                           type(e).__name__)
+            with _cache_lock:
+                _persona_cache_names.pop(prefix, None)
+    # Uncached fallback (also the path when caching is disabled/unavailable).
+    return _call_gemini(model, system, user)
+
+# ----------------------------------------------------------------------
 # PERSONA DEGRADE CHAIN (M4): a 503 on one model shouldn't kill the panel.
 # Degrade across MODELS, then PROVIDERS, then to a soft placeholder.
 #   gemini-2.5-flash-lite -> gemini-2.5-flash -> gpt-4o-mini
@@ -341,11 +495,17 @@ def _persona_placeholder(name):
 
 def _call_persona_with_degrade(system, user, persona_name):
     """Walk the degrade chain for one persona call. Each hop gets _with_retries;
-    on final failure step to the next provider/model. Exhausted -> placeholder."""
+    on final failure step to the next provider/model. Exhausted -> placeholder.
+    Gemini hops use the CACHED caller (explicit prompt caching); OpenAI/Anthropic
+    fallbacks send the full prompt uncached (they can't read a Gemini cache)."""
     for provider, model in PERSONA_DEGRADE_CHAIN:
-        fn = _PROVIDER_DISPATCH[provider]
+        if provider == "google":
+            fn = lambda m=model: _call_gemini_cached(m, system, user, persona_name)
+        else:
+            base = _PROVIDER_DISPATCH[provider]
+            fn = lambda b=base, m=model: b(m, system, user)
         try:
-            return _with_retries(lambda: fn(model, system, user))
+            return _with_retries(fn)
         except Exception as e:  # noqa: BLE001
             logger.warning("persona degrade: %s/%s failed for '%s' (%s); trying next hop",
                            provider, model, persona_name, type(e).__name__)
@@ -357,8 +517,8 @@ def _call_persona_with_degrade(system, user, persona_name):
 # AGENTS
 # ----------------------------------------------------------------------
 def run_persona_panel(idea):
-    """Run personas concurrently but RATE-LIMITED, with degrade fallback.
-    Mock mode keeps full concurrency and skips the rate gate (instant + free)."""
+    """Run personas concurrently, with degrade fallback.
+    Mock mode keeps full concurrency and skips(instant + free)."""
     def one(p):
         system = PERSONA_SYSTEM_TEMPLATE.format(
             name=p["name"], stance=p["stance"],

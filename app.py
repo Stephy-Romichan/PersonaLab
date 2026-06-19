@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from persona_lab_core import (
     run_persona_panel, run_moderator, run_strategist, PERSONAS,
     call_llm, PERSONA_SYSTEM_TEMPLATE, _mock_persona_for, _safe_json,
+    _call_persona_with_degrade, USE_MOCKS, warm_persona_caches,
 )
 
 st.set_page_config(page_title="Persona Lab", page_icon="🧪", layout="wide",
@@ -283,6 +284,15 @@ if run_clicked:
         st.session_state.result = None
         if demo_mode:
             st.markdown('<div class="demo">⚡ Demo mode — seeded example, no live API calls.</div>', unsafe_allow_html=True)
+        else:
+            # Warm the 5 persona prompt caches once per session (live runs only).
+            # Streamlit reruns the whole script on each click, so guard with
+            # session_state to avoid recreating caches every interaction.
+            # warm_persona_caches() is a no-op in mock mode / when caching is
+            # disabled, and never raises.
+            if not st.session_state.get("_caches_warmed"):
+                warm_persona_caches()
+                st.session_state["_caches_warmed"] = True
         st.markdown('<div class="sec">🧑‍🔬 Panel reactions</div>', unsafe_allow_html=True)
         slots = [st.empty() for _ in PERSONAS]
         for i, p in enumerate(PERSONAS):
@@ -291,7 +301,10 @@ if run_clicked:
         def run_one(idx_p):
             i, p = idx_p
             system = PERSONA_SYSTEM_TEMPLATE.format(name=p["name"], stance=p["stance"], priorities=", ".join(p["hidden_priorities"]), voice=p["voice"], idea=idea)
-            raw = call_llm("persona", system, idea, _mock_persona_for(p["name"]), idea)
+            if USE_MOCKS:
+                raw = _mock_persona_for(p["name"])(idea)
+            else:
+                raw = _call_persona_with_degrade(system, idea, p["name"])
             return i, _safe_json(raw, fallback={"persona": p["name"], "reaction": raw, "sentiment": "mixed", "key_objection": "n/a"})
         with ThreadPoolExecutor(max_workers=len(PERSONAS)) as ex:
             futures = {ex.submit(run_one, (i, p)): i for i, p in enumerate(PERSONAS)}
