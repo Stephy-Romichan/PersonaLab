@@ -1,8 +1,8 @@
 """
-Persona Lab — Streamlit UI ("Light Lab" theme)
-A sunlit, high-end research-facility aesthetic: glassmorphism, crisp grid,
-centered workspace, left-aligned sidebar, vibrant clinical accents.
-Output contract unchanged: works with mock or live backend with no edits.
+Persona Lab — Streamlit UI ("Light Lab", playful edition)
+Animated talking SVG faces, game-style colors, per-persona personality,
+and a personality side panel. Backend contract & call paths unchanged
+(degrade chain, cache warming, mock toggle all preserved).
 """
 
 import concurrent.futures
@@ -12,190 +12,190 @@ from concurrent.futures import ThreadPoolExecutor
 from persona_lab_core import (
     run_persona_panel, run_moderator, run_strategist, PERSONAS,
     call_llm, PERSONA_SYSTEM_TEMPLATE, _mock_persona_for, _safe_json,
+    _call_persona_with_degrade, USE_MOCKS, warm_persona_caches,
 )
 
 st.set_page_config(page_title="Persona Lab", page_icon="🧪", layout="wide",
                    initial_sidebar_state="expanded")
 
-# persona identity colors (cyan / green / amber family + complements)
-PERSONA_COLORS = [
-    {"bg": "#FFF5F5", "border": "#FA5252", "chip": "#FA5252", "emoji": "💸"},
-    {"bg": "#FFF9DB", "border": "#F59F00", "chip": "#F59F00", "emoji": "🚀"},
-    {"bg": "#E6FCF5", "border": "#0CA678", "chip": "#0CA678", "emoji": "🏢"},
-    {"bg": "#E7F5FF", "border": "#1098AD", "chip": "#1098AD", "emoji": "🛡️"},
-    {"bg": "#F3F0FF", "border": "#7048E8", "chip": "#7048E8", "emoji": "⏱️"},
-    {"bg": "#FFF0F6", "border": "#E64980", "chip": "#E64980", "emoji": "🎯"},
+# ---- persona personality presentation (keyed by name; falls back by index) ----
+# face: a builder key controlling the SVG expression; tone: chip color family
+PERSONA_UI = {
+    "Price-Sensitive Skeptic": {"emoji":"💸","face":"skeptic","accent":"#FA5252","bg":"#FFF0F1",
+        "tagline":"\"Prove it's worth my money.\"",
+        "blurb":"Tightfisted and unconvinced. Wants the cheapest path and assumes there's a free alternative."},
+    "Early Adopter": {"emoji":"🚀","face":"happy","accent":"#F59F00","bg":"#FFF8E1",
+        "tagline":"\"Ooh, shiny — let me try it!\"",
+        "blurb":"Loves novelty and bragging rights. Forgives rough edges, but bores fast if it feels generic."},
+    "Enterprise Buyer": {"emoji":"🏢","face":"glasses","accent":"#0CA678","bg":"#E7FBF3",
+        "tagline":"\"What's the ROI and is it secure?\"",
+        "blurb":"Measured and procurement-minded. Thinks in teams, budgets, security and compliance."},
+    "Risk-Averse Pragmatist": {"emoji":"🛡️","face":"worried","accent":"#4263EB","bg":"#EDF1FF",
+        "tagline":"\"…but what could go wrong?\"",
+        "blurb":"Cautious by default. Fixated on switching cost, reliability, and failure modes."},
+    "Time-Pressed Generalist": {"emoji":"⏱️","face":"flat","accent":"#7048E8","bg":"#F3EFFF",
+        "tagline":"\"Make it obvious in 30 seconds.\"",
+        "blurb":"Impatient and skimming. Judges instantly; needs value before it has to think."},
+}
+FALLBACK_UI = [
+    {"emoji":"🧩","face":"flat","accent":"#E64980","bg":"#FFF0F6","tagline":"","blurb":"A tailored panelist for this idea."},
+    {"emoji":"🔬","face":"happy","accent":"#1098AD","bg":"#E7F9FB","tagline":"","blurb":"A tailored panelist for this idea."},
 ]
-def color_for(i): return PERSONA_COLORS[i % len(PERSONA_COLORS)]
+def ui_for(name, i):
+    return PERSONA_UI.get(name, FALLBACK_UI[i % len(FALLBACK_UI)])
 
 SENTIMENT = {
-    "positive": {"label": "Positive", "color": "#0CA678", "bg": "#E6FCF5", "dot": "●"},
-    "mixed":    {"label": "Mixed",    "color": "#F59F00", "bg": "#FFF9DB", "dot": "●"},
-    "negative": {"label": "Negative", "color": "#FA5252", "bg": "#FFF5F5", "dot": "●"},
+    "positive": {"label":"Positive","color":"#0CA678","bg":"#E6FCF5","face":"happy"},
+    "mixed":    {"label":"Mixed","color":"#F59F00","bg":"#FFF9DB","face":"flat"},
+    "negative": {"label":"Negative","color":"#FA5252","bg":"#FFF5F5","face":"skeptic"},
 }
+
+# ---- SVG face builder: returns an inline svg for a given expression + color ----
+def face_svg(expr, accent, bg, talking=False, size=58):
+    eyes = {
+        "happy":   f'<path d="M22 31c2-2.6 6.5-2.6 8.5 0" fill="none" stroke="{accent}" stroke-width="2.6" stroke-linecap="round"/><path d="M43.5 31c2-2.6 6.5-2.6 8.5 0" fill="none" stroke="{accent}" stroke-width="2.6" stroke-linecap="round"/>',
+        "skeptic": f'<circle cx="27" cy="33" r="3" fill="{accent}"/><circle cx="47" cy="33" r="3" fill="{accent}"/><path d="M20 25l9 3M54 25l-9 3" stroke="{accent}" stroke-width="2.3" stroke-linecap="round"/>',
+        "worried": f'<circle cx="27" cy="34" r="2.8" fill="{accent}"/><circle cx="47" cy="34" r="2.8" fill="{accent}"/><path d="M19 27l9 2M55 27l-9 2" stroke="{accent}" stroke-width="2.2" stroke-linecap="round"/>',
+        "glasses": f'<rect x="20" y="29" width="14" height="9" rx="2.5" fill="none" stroke="{accent}" stroke-width="2"/><rect x="40" y="29" width="14" height="9" rx="2.5" fill="none" stroke="{accent}" stroke-width="2"/><path d="M34 33h6" stroke="{accent}" stroke-width="2"/>',
+        "flat":    f'<circle cx="27" cy="33" r="3" fill="{accent}"/><circle cx="47" cy="33" r="3" fill="{accent}"/>',
+    }.get(expr, f'<circle cx="27" cy="33" r="3" fill="{accent}"/><circle cx="47" cy="33" r="3" fill="{accent}"/>')
+    if talking:
+        mouth = f'<ellipse class="mouth-talk" cx="37" cy="49" rx="6" ry="5" fill="{accent}" style="transform-origin:37px 49px"/>'
+    else:
+        mouth = {
+            "happy":   f'<path d="M26 47c5 6 17 6 22 0" fill="none" stroke="{accent}" stroke-width="2.6" stroke-linecap="round"/>',
+            "skeptic": f'<path d="M26 50c5-5 17-5 22 0" fill="none" stroke="{accent}" stroke-width="2.6" stroke-linecap="round"/>',
+            "worried": f'<path d="M28 49h18" fill="none" stroke="{accent}" stroke-width="2.6" stroke-linecap="round"/>',
+            "glasses": f'<path d="M29 49h16" stroke="{accent}" stroke-width="2.6" stroke-linecap="round"/>',
+            "flat":    f'<path d="M28 49h18" stroke="{accent}" stroke-width="2.6" stroke-linecap="round"/>',
+        }.get(expr, f'<path d="M28 49h18" stroke="{accent}" stroke-width="2.6" stroke-linecap="round"/>')
+    blink = '<g class="blink">' + eyes + '</g>'
+    cls = "face-bob" + (" face-talk-wrap" if talking else "")
+    return (f'<svg class="{cls}" width="{size}" height="{size}" viewBox="0 0 74 74" style="overflow:visible">'
+            f'<circle cx="37" cy="37" r="32" fill="{bg}" stroke="{accent}" stroke-width="1.4"/>'
+            f'{blink}{mouth}</svg>')
 
 st.markdown("""
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap');
-
-  /* ---- base: sunlit lab ---- */
+  @import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap');
   .stApp {
     background:
-      radial-gradient(1200px 500px at 78% -10%, rgba(16,152,173,0.07), transparent 60%),
-      radial-gradient(900px 400px at 10% 0%, rgba(12,166,120,0.06), transparent 55%),
-      #F8F9FA;
-    color: #1A202C;
-    font-family: 'Inter', -apple-system, 'Segoe UI', sans-serif;
+      radial-gradient(1100px 460px at 80% -10%, rgba(240,159,0,0.08), transparent 60%),
+      radial-gradient(900px 420px at 8% 0%, rgba(12,166,120,0.08), transparent 55%),
+      radial-gradient(700px 360px at 50% 110%, rgba(66,99,235,0.06), transparent 60%),
+      #FBFAF7;
+    color:#1A202C; font-family:'Inter',sans-serif;
   }
-  #MainMenu, footer, header { visibility: hidden; }
-  .block-container { padding-top: 1.6rem; padding-bottom: 3rem; max-width: 880px; }
+  #MainMenu, footer, header { visibility:hidden; }
+  .block-container { padding-top:1.5rem; padding-bottom:3rem; max-width:900px; }
 
-  /* faint lab watermark behind the whole workspace */
-  .stApp::before {
-    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
-    background-image:
-      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'><g fill='none' stroke='%23CED4DA' stroke-width='1.4' opacity='0.30'><path d='M52 18h16M56 18v20L44 74a6 6 0 0 0 6 8h20a6 6 0 0 0 6-8L64 38V18'/><circle cx='58' cy='70' r='2'/><circle cx='64' cy='64' r='1.6'/></g></svg>");
-    background-repeat: no-repeat; background-position: 90% 78%; background-size: 220px;
-    opacity: 0.7;
+  @media (prefers-reduced-motion: no-preference){
+    .face-bob{animation:bob 3.2s ease-in-out infinite}
+    .blink{animation:blink 4.2s ease-in-out infinite;transform-origin:center}
+    .mouth-talk{animation:talk .42s ease-in-out infinite}
+    .pcard{animation:pop .5s cubic-bezier(.22,1,.36,1)}
+    .chip-face .face-bob{animation:bob 2.6s ease-in-out infinite}
   }
-  .block-container, section[data-testid="stSidebar"] { position: relative; z-index: 1; }
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+  @keyframes blink{0%,92%,100%{transform:scaleY(1)}96%{transform:scaleY(.1)}}
+  @keyframes talk{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
+  @keyframes pop{from{opacity:0;transform:scale(.9) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}
+  .dots span{display:inline-block;animation:d 1.4s infinite}
+  .dots span:nth-child(2){animation-delay:.2s}.dots span:nth-child(3){animation-delay:.4s}
+  @keyframes d{0%,100%{opacity:.3}50%{opacity:1}}
 
-  /* ---- sidebar: frosted glassware ---- */
-  section[data-testid="stSidebar"] {
-    background: rgba(255,255,255,0.65) !important;
-    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-    border-right: 1px solid #E9ECEF;
-  }
-  section[data-testid="stSidebar"] * { color: #1A202C; }
-  .side-title { font-weight: 800; font-size: 1.05rem; letter-spacing: -0.01em; margin-bottom: 0.2rem; }
-  .side-sub { color: #868E96; font-size: 0.78rem; margin-bottom: 0.8rem; }
-  .route-row {
-    display:flex; align-items:center; gap:0.55rem; padding:0.5rem 0.65rem; margin:0.3rem 0;
-    background:#fff; border:1px solid #E9ECEF; border-radius:8px; font-size:0.82rem;
-  }
-  .route-row .tag { margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:#1098AD; background:#E7F5FF; padding:2px 7px; border-radius:5px; }
+  .hero{position:relative;text-align:center;padding:1.4rem 0 0.4rem;}
+  .hero-badge{display:inline-flex;align-items:center;gap:6px;background:#FFF3D6;color:#9A5B00;font-family:'JetBrains Mono',monospace;font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;padding:5px 13px;border-radius:20px;border:1.5px solid #FFE08A;}
+  .hero-title{font-family:'Baloo 2',cursive;font-size:3.4rem;font-weight:700;color:#1A202C;margin:0.5rem 0 0;line-height:1.0;display:flex;align-items:baseline;justify-content:center;gap:0.6rem;}
+  .hero-title .accent{color:#0CA678;}
+  .hero-sub{color:#5A6270;font-size:1.05rem;margin-top:0.4rem;}
 
-  /* ---- hero ---- */
-  .hero {
-    position: relative; background: rgba(255,255,255,0.7);
-    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-    border: 1px solid #E9ECEF; border-radius: 16px; padding: 1.8rem 1.8rem 1.6rem;
-    box-shadow: 0 10px 30px rgba(26,32,44,0.06); text-align: center; overflow: hidden;
-    margin-bottom: 1.3rem;
-  }
-  .hero-badge {
-    display:inline-flex; align-items:center; gap:0.4rem; background:#E7F5FF; color:#1098AD;
-    font-size:0.7rem; font-weight:700; letter-spacing:0.12em; text-transform:uppercase;
-    padding:5px 13px; border-radius:20px; font-family:'JetBrains Mono',monospace;
-  }
-  .hero-title {
-    font-size:3rem; font-weight:800; letter-spacing:-0.03em; color:#1A202C;
-    margin:0.6rem 0 0; line-height:1.05;
-    display:flex; align-items:baseline; justify-content:center; gap:0.7rem;
-  }
-  .hero-title .accent { color:#1098AD; }
-  .hero-sub { color:#495057; font-size:1.02rem; margin-top:0.5rem; }
-  .hero-deco { position:absolute; opacity:0.55; pointer-events:none; }
-  .hero-deco.a  { top:14px;  left:18px; animation: drift 6s ease-in-out infinite; }
-  .hero-deco.b  { bottom:12px; right:20px; animation: drift 7s ease-in-out infinite 0.5s; }
-  .hero-deco.c  { top:50px;  left:64px; animation: drift 6.5s ease-in-out infinite 0.2s; }
-  .hero-deco.d  { top:16px;  right:70px; animation: drift 5.6s ease-in-out infinite 0.8s; }
-  .hero-deco.e  { bottom:14px; left:26px; animation: drift 7.4s ease-in-out infinite 0.3s; }
-  .hero-deco.f  { top:54px;  right:24px; animation: drift 6.2s ease-in-out infinite 0.6s; }
-  .hero-deco.g  { bottom:46px; right:78px; animation: drift 6.8s ease-in-out infinite 0.1s; }
-  @keyframes drift { 0%,100%{transform:translateY(0) rotate(-2deg)} 50%{transform:translateY(-7px) rotate(2deg)} }
-  /* scientist avatar inside the badge */
-  .hero-scientist { vertical-align:middle; margin-right:2px; }
-  @media (max-width: 760px) { .hero-deco.c,.hero-deco.d,.hero-deco.e,.hero-deco.f,.hero-deco.g { display:none; } }
+  .stTextArea textarea{background:#FFFFFF !important;border:2px solid #E9E4D8 !important;border-radius:14px !important;color:#1A202C !important;font-size:0.98rem !important;padding:0.9rem 1rem !important;}
+  .stTextArea textarea:focus{border-color:#0CA678 !important;box-shadow:0 0 0 4px rgba(12,166,120,0.14) !important;}
+  .stButton > button{background:#0CA678 !important;color:#fff !important;font-family:'Baloo 2',cursive !important;font-weight:600 !important;font-size:1.02rem !important;border:none !important;border-radius:13px !important;padding:0.6rem 2rem !important;box-shadow:0 5px 0 #0B8A63 !important;transition:transform 0.08s ease, box-shadow 0.08s ease !important;}
+  .stButton > button:hover{transform:translateY(2px) !important;box-shadow:0 3px 0 #0B8A63 !important;}
 
-  /* ---- input ---- */
-  .stTextArea textarea {
-    background:#FFFFFF !important; border:1px solid #DEE2E6 !important; border-radius:10px !important;
-    color:#1A202C !important; font-size:0.98rem !important; padding:0.9rem 1rem !important;
-    box-shadow:0 1px 2px rgba(26,32,44,0.04) !important;
-  }
-  .stTextArea textarea:focus { border-color:#1098AD !important; box-shadow:0 0 0 4px rgba(16,152,173,0.12) !important; }
-  .stButton > button {
-    background:#1098AD !important; color:#fff !important; font-weight:700 !important; font-size:0.98rem !important;
-    border:none !important; border-radius:10px !important; padding:0.7rem 1.9rem !important;
-    box-shadow:0 6px 16px rgba(16,152,173,0.25) !important;
-    transition: background 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease !important;
-  }
-  .stButton > button:hover { background:#0C8599 !important; transform:translateY(-1px) !important; box-shadow:0 9px 22px rgba(16,152,173,0.34) !important; }
+  .sec{font-family:'Baloo 2',cursive;font-weight:600;font-size:1rem;color:#3A4150;margin:1.7rem 0 0.7rem;display:flex;align-items:center;gap:0.5rem;}
+  .sec::after{content:"";flex:1;height:2px;border-radius:2px;background:#EFE9DC;}
 
-  /* ---- section dividers ---- */
-  .sec {
-    font-weight:700; font-size:0.74rem; color:#868E96; text-transform:uppercase;
-    letter-spacing:0.12em; margin:1.7rem 0 0.7rem; display:flex; align-items:center; gap:0.55rem;
-    font-family:'JetBrains Mono',monospace;
-  }
-  .sec::after { content:""; flex:1; height:1px; background:#E9ECEF; }
+  .pcard{background:#FFFFFF;border:2px solid;border-radius:18px;padding:1rem 1.15rem;margin-bottom:0.85rem;box-shadow:0 5px 0 rgba(26,32,44,0.05);}
+  .pcard-row{display:flex;align-items:flex-start;gap:13px;}
+  .pcard-facecol{display:flex;flex-direction:column;align-items:center;gap:5px;flex-shrink:0;width:64px;}
+  .pcard-badge{font-size:10px;font-weight:700;font-family:'JetBrains Mono',monospace;padding:2px 8px;border-radius:20px;white-space:nowrap;}
+  .bubble{position:relative;background:#FBFAF7;border:1.5px solid #ECE6D8;border-radius:14px;padding:0.65rem 0.9rem;}
+  .bubble::before{content:"";position:absolute;left:-8px;top:16px;width:0;height:0;border-top:7px solid transparent;border-bottom:7px solid transparent;border-right:9px solid #ECE6D8;}
+  .bubble::after{content:"";position:absolute;left:-6px;top:17px;width:0;height:0;border-top:6px solid transparent;border-bottom:6px solid transparent;border-right:7px solid #FBFAF7;}
+  .bubble-txt{font-size:13.5px;line-height:1.55;color:#2A2F3A;}
+  .pcard-name{font-family:'Baloo 2',cursive;font-weight:600;font-size:1rem;margin-top:7px;color:#1A202C;}
+  .pcard-obj{margin-top:4px;font-size:12px;color:#6A717E;}
+  .pcard-obj b{color:#1A202C;}
 
-  /* ---- persona cards ---- */
-  .pcard {
-    background:#FFFFFF; border:1px solid #E9ECEF; border-left:4px solid;
-    border-radius:8px; padding:1.05rem 1.2rem; margin-bottom:0.75rem;
-    box-shadow:0 4px 14px rgba(26,32,44,0.05);
-    animation: rise 0.45s cubic-bezier(0.22,1,0.36,1);
-  }
-  @keyframes rise { from{opacity:0; transform:translateY(10px);} to{opacity:1; transform:translateY(0);} }
-  .pcard-head { display:flex; align-items:center; gap:0.6rem; margin-bottom:0.5rem; }
-  .pcard-emoji { width:38px; height:38px; border-radius:9px; display:grid; place-items:center; font-size:1.05rem; }
-  .pcard-name { font-weight:700; font-size:0.97rem; color:#1A202C; }
-  .pcard-sent { margin-left:auto; font-size:0.7rem; font-weight:700; padding:3px 10px; border-radius:6px; font-family:'JetBrains Mono',monospace; }
-  .pcard-react { color:#343A40; font-size:0.92rem; line-height:1.6; }
-  .pcard-obj { margin-top:0.7rem; padding-top:0.6rem; border-top:1px solid #F1F3F5; font-size:0.84rem; }
-  .pcard-obj b { color:#1A202C; } .pcard-obj span { color:#495057; }
+  .skel{background:#FFFFFF;border:2px dashed #E5DFD0;border-radius:18px;padding:1rem 1.15rem;margin-bottom:0.85rem;}
+  .skel-row{display:flex;align-items:center;gap:13px;}
+  .skel-txt{color:#9AA0AC;font-size:0.92rem;}
 
-  .skel { background:#FFFFFF; border:1px dashed #DEE2E6; border-radius:8px; padding:1.05rem 1.2rem; margin-bottom:0.75rem; color:#ADB5BD; font-size:0.9rem; display:flex; align-items:center; gap:0.6rem; }
-  .pulse { animation: blink 1.1s ease-in-out infinite; } @keyframes blink { 0%,100%{opacity:0.35;} 50%{opacity:1;} }
+  .meter{background:#FFFFFF;border:2px solid #EFE9DC;border-radius:16px;padding:1rem 1.15rem;box-shadow:0 5px 0 rgba(26,32,44,0.04);}
+  .meter-h{font-family:'Baloo 2',cursive;font-weight:600;font-size:0.95rem;color:#1A202C;display:flex;justify-content:space-between;align-items:center;}
+  .meter-h .count{font-family:'JetBrains Mono',monospace;font-size:0.76rem;color:#9AA0AC;}
+  .bar{display:flex;height:15px;border-radius:10px;overflow:hidden;margin-top:0.6rem;background:#F1ECE0;}
+  .bar>div{transition:width 0.6s ease;}
+  .legend{display:flex;gap:1.1rem;margin-top:0.6rem;font-size:0.78rem;color:#5A6270;font-family:'JetBrains Mono',monospace;}
+  .legend span{display:flex;align-items:center;gap:0.35rem;}
+  .sw{width:10px;height:10px;border-radius:4px;}
 
-  /* ---- sentiment meter ---- */
-  .meter { background:#FFFFFF; border:1px solid #E9ECEF; border-radius:10px; padding:1rem 1.15rem; box-shadow:0 4px 14px rgba(26,32,44,0.05); }
-  .meter-h { font-weight:700; font-size:0.88rem; color:#1A202C; display:flex; align-items:center; justify-content:space-between; }
-  .meter-h .count { font-family:'JetBrains Mono',monospace; font-size:0.76rem; color:#868E96; }
-  .bar { display:flex; height:13px; border-radius:7px; overflow:hidden; margin-top:0.65rem; background:#F1F3F5; }
-  .bar > div { transition:width 0.6s ease; }
-  .legend { display:flex; gap:1.1rem; margin-top:0.65rem; font-size:0.78rem; color:#495057; font-family:'JetBrains Mono',monospace; }
-  .legend span { display:flex; align-items:center; gap:0.35rem; }
-  .sw { width:10px; height:10px; border-radius:3px; }
+  .tcard{background:#FFFFFF;border:2px solid #EFE9DC;border-radius:14px;padding:0.8rem 1rem;margin-bottom:0.6rem;box-shadow:0 4px 0 rgba(26,32,44,0.04);}
+  .tcard-name{font-family:'Baloo 2',cursive;font-weight:600;color:#1A202C;font-size:0.96rem;}
+  .tcard-who{color:#9AA0AC;font-size:0.77rem;margin-top:0.25rem;font-family:'JetBrains Mono',monospace;}
+  .tcard-tension{color:#E8590C;font-size:0.85rem;margin-top:0.35rem;}
+  .pill{border-radius:14px;padding:0.75rem 1rem;margin-top:0.5rem;}
+  .pill-l{font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;}
+  .pill-t{font-size:0.9rem;margin-top:0.2rem;color:#2A2F3A;}
 
-  /* ---- themes ---- */
-  .tcard { background:#FFFFFF; border:1px solid #E9ECEF; border-left:4px solid #1098AD; border-radius:8px; padding:0.85rem 1.05rem; margin-bottom:0.6rem; box-shadow:0 3px 10px rgba(26,32,44,0.04); animation: rise 0.4s ease; }
-  .tcard-name { font-weight:700; color:#1A202C; font-size:0.94rem; }
-  .tcard-who { color:#868E96; font-size:0.77rem; margin-top:0.25rem; font-family:'JetBrains Mono',monospace; }
-  .tcard-tension { color:#E8590C; font-size:0.85rem; margin-top:0.35rem; }
-  .pill { border-radius:8px; padding:0.8rem 1.05rem; margin-top:0.5rem; }
-  .pill-l { font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; font-family:'JetBrains Mono',monospace; }
-  .pill-t { font-size:0.9rem; margin-top:0.2rem; color:#343A40; }
+  .scard{background:#FFFFFF;border:2px solid #DDF3EA;border-radius:16px;padding:1rem 1.25rem;box-shadow:0 5px 0 rgba(12,166,120,0.08);}
+  .sitem{display:flex;gap:0.7rem;padding:0.5rem 0;color:#2A2F3A;font-size:0.92rem;line-height:1.55;}
+  .sitem + .sitem{border-top:1.5px solid #F0ECE0;}
+  .sitem .num{flex-shrink:0;width:24px;height:24px;border-radius:8px;background:#E6FCF5;color:#0B8A63;font-size:0.72rem;font-weight:700;display:grid;place-items:center;font-family:'JetBrains Mono',monospace;}
 
-  /* ---- strategy ---- */
-  .scard { background:#FFFFFF; border:1px solid #E9ECEF; border-radius:10px; padding:1.1rem 1.3rem; box-shadow:0 4px 14px rgba(26,32,44,0.06); }
-  .sitem { display:flex; gap:0.7rem; padding:0.5rem 0; color:#343A40; font-size:0.92rem; line-height:1.55; }
-  .sitem + .sitem { border-top:1px solid #F1F3F5; }
-  .sitem .num { flex-shrink:0; width:22px; height:22px; border-radius:6px; background:#E7F5FF; color:#1098AD; font-size:0.72rem; font-weight:700; display:grid; place-items:center; font-family:'JetBrains Mono',monospace; }
-
-  .demo { background:#FFF9DB; border:1px solid #FFE066; border-radius:10px; padding:0.6rem 1rem; color:#A8770A; font-size:0.85rem; margin-bottom:1rem; display:flex; align-items:center; gap:0.5rem; }
+  /* sidebar persona cards */
+  .roster-card{background:#fff;border:2px solid;border-radius:14px;padding:0.6rem 0.7rem;margin-bottom:0.55rem;}
+  .roster-top{display:flex;align-items:center;gap:9px;}
+  .roster-name{font-family:'Baloo 2',cursive;font-weight:600;font-size:0.86rem;color:#1A202C;line-height:1.1;}
+  .roster-tag{font-size:0.74rem;color:#6A717E;font-style:italic;margin-top:1px;}
+  .roster-blurb{font-size:0.74rem;color:#5A6270;margin-top:0.4rem;line-height:1.4;}
+  .demo{background:#FFF9DB;border:2px solid #FFE066;border-radius:13px;padding:0.6rem 1rem;color:#9A5B00;font-size:0.85rem;margin-bottom:1rem;}
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- helpers ----------
 def persona_card(r, i):
-    c = color_for(i)
+    name = r.get("persona", f"Persona {i+1}")
+    ui = ui_for(name, i)
     s = SENTIMENT.get(r.get("sentiment", "mixed"), SENTIMENT["mixed"])
+    face = face_svg(s["face"], ui["accent"], ui["bg"], talking=False)
     return f"""
-<div class="pcard" style="border-left-color:{c['border']};">
-  <div class="pcard-head">
-    <div class="pcard-emoji" style="background:{c['bg']};">{c['emoji']}</div>
-    <div class="pcard-name">{r['persona']}</div>
-    <div class="pcard-sent" style="background:{s['bg']}; color:{s['color']};">{s['dot']} {s['label']}</div>
+<div class="pcard" style="border-color:{ui['accent']};">
+  <div class="pcard-row">
+    <div class="pcard-facecol">
+      {face}
+      <div class="pcard-badge" style="background:{s['bg']};color:{s['color']};">{s['label']}</div>
+    </div>
+    <div style="flex:1;">
+      <div class="bubble"><div class="bubble-txt">{r['reaction']}</div></div>
+      <div class="pcard-name">{ui['emoji']} {name}</div>
+      <div class="pcard-obj"><b>Holds them back:</b> {r.get('key_objection','')}</div>
+    </div>
   </div>
-  <div class="pcard-react">{r['reaction']}</div>
-  <div class="pcard-obj"><b>Holds them back:</b> <span>{r.get('key_objection','')}</span></div>
 </div>"""
 
-def skeleton(name):
-    return f'<div class="skel"><span class="pulse">⚗️</span> {name} is reacting...</div>'
+def skeleton(name, i):
+    ui = ui_for(name, i)
+    face = face_svg(ui["face"], ui["accent"], ui["bg"], talking=True)
+    return f"""
+<div class="skel">
+  <div class="skel-row">
+    <div class="pcard-facecol">{face}</div>
+    <div class="skel-txt">{ui['emoji']} <b>{name}</b> is reacting<span class="dots"><span>.</span><span>.</span><span>.</span></span></div>
+  </div>
+</div>"""
 
 def theme_card(t):
     who = ", ".join(t.get("supported_by", []))
@@ -204,73 +204,65 @@ def theme_card(t):
     return f'<div class="tcard"><div class="tcard-name">{t["theme"]}</div><div class="tcard-who">Raised by: {who}</div>{th}</div>'
 
 def sentiment_meter(reactions):
-    counts = {"positive": 0, "mixed": 0, "negative": 0}
+    counts = {"positive":0,"mixed":0,"negative":0}
     for r in reactions:
-        k = r.get("sentiment", "mixed"); counts[k] = counts.get(k, 0) + 1
-    total = max(sum(counts.values()), 1)
-    seg = "".join(f'<div style="width:{counts[k]/total*100}%; background:{SENTIMENT[k]["color"]};"></div>' for k in ["positive","mixed","negative"] if counts[k] > 0)
-    legend = "".join(f'<span><i class="sw" style="background:{SENTIMENT[k]["color"]}"></i>{SENTIMENT[k]["label"]} {counts[k]}</span>' for k in ["positive","mixed","negative"])
+        k = r.get("sentiment","mixed"); counts[k] = counts.get(k,0)+1
+    total = max(sum(counts.values()),1)
+    colors = {"positive":"#0CA678","mixed":"#F59F00","negative":"#FA5252"}
+    seg = "".join(f'<div style="width:{counts[k]/total*100}%;background:{colors[k]};"></div>' for k in ["positive","mixed","negative"] if counts[k]>0)
+    legend = "".join(f'<span><i class="sw" style="background:{colors[k]}"></i>{SENTIMENT[k]["label"]} {counts[k]}</span>' for k in ["positive","mixed","negative"])
     return f'<div class="meter"><div class="meter-h"><span>Panel sentiment</span><span class="count">n={total}</span></div><div class="bar">{seg}</div><div class="legend">{legend}</div></div>'
 
 def strategy_card(strategy):
-    lines = [ln.strip().lstrip("-*•▸ ").strip() for ln in strategy.replace(" - ", "\n- ").splitlines() if ln.strip().lstrip("-*•▸ ").strip()]
-    items = "".join(f'<div class="sitem"><span class="num">{n+1:02d}</span><span>{ln}</span></div>' for n, ln in enumerate(lines))
+    lines = [ln.strip().lstrip("-*•▸ ").strip() for ln in strategy.replace(" - ","\n- ").splitlines() if ln.strip().lstrip("-*•▸ ").strip()]
+    items = "".join(f'<div class="sitem"><span class="num">{n+1:02d}</span><span>{ln}</span></div>' for n,ln in enumerate(lines))
     return f'<div class="scard">{items}</div>'
 
 def render_moderation(mod):
     for t in mod.get("themes", []):
         st.markdown(theme_card(t), unsafe_allow_html=True)
     if mod.get("consensus"):
-        st.markdown(f'<div class="pill" style="background:#E6FCF5; border:1px solid #B2F2DD;"><div class="pill-l" style="color:#0CA678;">✓ Consensus</div><div class="pill-t">{mod["consensus"]}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="pill" style="background:#E6FCF5;border:2px solid #B2F2DD;"><div class="pill-l" style="color:#0B8A63;">✓ Consensus</div><div class="pill-t">{mod["consensus"]}</div></div>', unsafe_allow_html=True)
     if mod.get("biggest_risk"):
-        st.markdown(f'<div class="pill" style="background:#FFF5F5; border:1px solid #FFC9C9;"><div class="pill-l" style="color:#FA5252;">⚠ Biggest risk</div><div class="pill-t">{mod["biggest_risk"]}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="pill" style="background:#FFF5F5;border:2px solid #FFC9C9;"><div class="pill-l" style="color:#D43A3A;">⚠ Biggest risk</div><div class="pill-t">{mod["biggest_risk"]}</div></div>', unsafe_allow_html=True)
 
 if "result" not in st.session_state:
     st.session_state.result = None
 
-# ---------- sidebar (left-aligned metadata + accordions) ----------
+# ---- sidebar: meet the panel ----
 with st.sidebar:
-    st.markdown('<div class="side-title">🧪 Lab bench</div>', unsafe_allow_html=True)
-    st.markdown('<div class="side-sub">Controls & instrument routing</div>', unsafe_allow_html=True)
-    demo_mode = st.toggle("Demo mode", value=False, help="Seeded example, no live API calls — safe for presentations.")
-    with st.expander("Model routing", expanded=True):
-        st.markdown('<div class="route-row">💸 Personas <span class="tag">Gemini Flash-Lite</span></div>', unsafe_allow_html=True)
-        st.markdown('<div class="route-row">🧭 Moderator <span class="tag">GPT-4o-mini</span></div>', unsafe_allow_html=True)
-        st.markdown('<div class="route-row">🧠 Strategist <span class="tag">Claude Haiku</span></div>', unsafe_allow_html=True)
-    with st.expander("About this method", expanded=False):
-        st.markdown("Persona Lab simulates a focus group of distinct AI personas. They react, a Moderator clusters the tensions, and a Strategist turns them into recommendations.")
-    with st.expander("Cost", expanded=False):
-        st.markdown('<div class="route-row">Estimated total <span class="tag">~$0–3</span></div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-family:Baloo 2,cursive;font-weight:700;font-size:1.15rem;">🧪 Meet the panel</div>', unsafe_allow_html=True)
+    st.caption("Five personalities, five points of view.")
+    for i, p in enumerate(PERSONAS):
+        ui = ui_for(p["name"], i)
+        face = face_svg(ui["face"], ui["accent"], ui["bg"], talking=False, size=40)
+        st.markdown(f"""
+<div class="roster-card chip-face" style="border-color:{ui['accent']};">
+  <div class="roster-top">{face}
+    <div><div class="roster-name">{ui['emoji']} {p['name']}</div>
+    <div class="roster-tag">{ui['tagline']}</div></div>
+  </div>
+  <div class="roster-blurb">{ui['blurb']}</div>
+</div>""", unsafe_allow_html=True)
+    st.markdown("---")
+    demo_mode = st.toggle("Demo mode", value=False, help="Seeded example, no live API calls.")
+    with st.expander("Model routing", expanded=False):
+        st.markdown("💸 Personas · `Gemini Flash-Lite`")
+        st.markdown("🧭 Moderator · `GPT-4o-mini`")
+        st.markdown("🧠 Strategist · `Claude Haiku`")
+    st.caption("Cost-aware routing · ~$0–3 total")
 
-# ---------- hero ----------
+# ---- hero ----
 st.markdown("""
 <div class="hero">
-  <!-- conical flask -->
-  <svg class="hero-deco a" width="40" height="40" viewBox="0 0 48 48" fill="none"><path d="M19 6h10M21 6v13L13 38a4 4 0 0 0 4 5h14a4 4 0 0 0 4-5l-8-19V6" stroke="#1098AD" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 31h16" stroke="#0CA678" stroke-width="2" stroke-linecap="round"/><circle cx="22" cy="35" r="1.4" fill="#0CA678"/><circle cx="27" cy="38" r="1.2" fill="#F59F00"/></svg>
-  <!-- molecule -->
-  <svg class="hero-deco b" width="36" height="36" viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="6" stroke="#7048E8" stroke-width="2"/><circle cx="10" cy="14" r="3" fill="#1098AD"/><circle cx="38" cy="16" r="3" fill="#0CA678"/><circle cx="12" cy="36" r="3" fill="#F59F00"/><path d="M15 16l5 5M33 18l-4 4M14 34l6-5" stroke="#CED4DA" stroke-width="1.6"/></svg>
-  <!-- test tube -->
-  <svg class="hero-deco c" width="26" height="26" viewBox="0 0 48 48" fill="none"><rect x="19" y="5" width="10" height="33" rx="5" stroke="#0CA678" stroke-width="2"/><path d="M19 25h10v8a5 5 0 0 1-10 0z" fill="#0CA678" fill-opacity="0.25"/><path d="M16 5h16" stroke="#1098AD" stroke-width="2" stroke-linecap="round"/></svg>
-  <!-- microscope -->
-  <svg class="hero-deco d" width="34" height="34" viewBox="0 0 48 48" fill="none"><path d="M22 10l6 3-7 14-6-3z" stroke="#1098AD" stroke-width="2" stroke-linejoin="round"/><path d="M18 26c-3 4-3 9 2 12h14" stroke="#7048E8" stroke-width="2" stroke-linecap="round"/><path d="M14 40h22" stroke="#343A40" stroke-width="2" stroke-linecap="round"/><circle cx="25" cy="11" r="2" fill="#F59F00"/></svg>
-  <!-- beaker with bubbles -->
-  <svg class="hero-deco e" width="30" height="30" viewBox="0 0 48 48" fill="none"><path d="M17 8h14v9l7 18a4 4 0 0 1-4 5H14a4 4 0 0 1-4-5l7-18z" stroke="#1098AD" stroke-width="2" stroke-linejoin="round"/><path d="M13 30h22" stroke="#0CA678" stroke-width="2"/><circle cx="22" cy="36" r="1.4" fill="#1098AD"/><circle cx="28" cy="33" r="1.2" fill="#F59F00"/><circle cx="25" cy="39" r="1" fill="#0CA678"/></svg>
-  <!-- DNA helix -->
-  <svg class="hero-deco f" width="28" height="28" viewBox="0 0 48 48" fill="none"><path d="M16 6c0 8 16 10 16 18s-16 10-16 18" stroke="#7048E8" stroke-width="2" stroke-linecap="round"/><path d="M32 6c0 8-16 10-16 18s16 10 16 18" stroke="#1098AD" stroke-width="2" stroke-linecap="round"/><path d="M18 12h12M17 18h14M17 30h14M18 36h12" stroke="#CED4DA" stroke-width="1.6"/></svg>
-  <!-- bar chart -->
-  <svg class="hero-deco g" width="26" height="26" viewBox="0 0 48 48" fill="none"><path d="M8 40h32" stroke="#343A40" stroke-width="2" stroke-linecap="round"/><rect x="12" y="26" width="6" height="14" rx="1.5" fill="#1098AD"/><rect x="21" y="18" width="6" height="22" rx="1.5" fill="#0CA678"/><rect x="30" y="12" width="6" height="28" rx="1.5" fill="#F59F00"/></svg>
-
-  <div class="hero-badge">
-    <svg class="hero-scientist" width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="6" r="3" stroke="#1098AD" stroke-width="1.8"/><path d="M6 22v-2a6 6 0 0 1 12 0v2" stroke="#1098AD" stroke-width="1.8" stroke-linecap="round"/><path d="M12 14v8M9.5 14.5l1 4M14.5 14.5l-1 4" stroke="#0CA678" stroke-width="1.6" stroke-linecap="round"/></svg>
-    Synthetic Focus Group
-  </div>
+  <div class="hero-badge">🧪 Synthetic Focus Group</div>
   <h1 class="hero-title"><span>Persona</span><span class="accent">Lab</span></h1>
-  <div class="hero-sub">Drop in any idea. Watch five distinct personas react — and disagree.</div>
+  <div class="hero-sub">Drop in any idea. Watch five personalities react — and disagree.</div>
 </div>
 """, unsafe_allow_html=True)
 
 DEMO_IDEA = "A subscription app that turns your grocery receipts into weekly meal plans."
-idea_input = st.text_area("Your idea", placeholder="e.g. An app that scans your fridge and suggests recipes from what you already have...", height=100, label_visibility="collapsed")
+idea_input = st.text_area("Your idea", placeholder="e.g. A monthly box that delivers a surprise hobby kit — pottery, calligraphy, beekeeping...", height=100, label_visibility="collapsed")
 col1, _ = st.columns([1, 3])
 with col1:
     run_clicked = st.button("Run focus group  →", use_container_width=True)
@@ -278,20 +270,28 @@ with col1:
 if run_clicked:
     idea = DEMO_IDEA if demo_mode else idea_input.strip()
     if not idea:
-        st.warning("Drop in an idea first.")
+        st.warning("Drop in an idea first!")
     else:
         st.session_state.result = None
         if demo_mode:
             st.markdown('<div class="demo">⚡ Demo mode — seeded example, no live API calls.</div>', unsafe_allow_html=True)
+        if not USE_MOCKS:
+            try:
+                warm_persona_caches()
+            except Exception:
+                pass
         st.markdown('<div class="sec">🧑‍🔬 Panel reactions</div>', unsafe_allow_html=True)
         slots = [st.empty() for _ in PERSONAS]
         for i, p in enumerate(PERSONAS):
-            slots[i].markdown(skeleton(p["name"]), unsafe_allow_html=True)
+            slots[i].markdown(skeleton(p["name"], i), unsafe_allow_html=True)
         reactions = [None] * len(PERSONAS)
         def run_one(idx_p):
             i, p = idx_p
             system = PERSONA_SYSTEM_TEMPLATE.format(name=p["name"], stance=p["stance"], priorities=", ".join(p["hidden_priorities"]), voice=p["voice"], idea=idea)
-            raw = call_llm("persona", system, idea, _mock_persona_for(p["name"]), idea)
+            if USE_MOCKS:
+                raw = _mock_persona_for(p["name"])(idea)
+            else:
+                raw = _call_persona_with_degrade(system, idea, p["name"])
             return i, _safe_json(raw, fallback={"persona": p["name"], "reaction": raw, "sentiment": "mixed", "key_objection": "n/a"})
         with ThreadPoolExecutor(max_workers=len(PERSONAS)) as ex:
             futures = {ex.submit(run_one, (i, p)): i for i, p in enumerate(PERSONAS)}
